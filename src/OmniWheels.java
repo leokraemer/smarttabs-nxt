@@ -33,5 +33,11 @@ public class OmniWheels extends AbstractOmniDrive {
 		// negate the speed
 		tempv3 = - vy + turningspeed;
 		tempv4 = - vx + turningspeed;
-	}						
+	}				
+	
+    @Override
+    protected void driveLiftingarmToAngle(float angle) {
+    	// TODO Auto-generated method stub
+    	
+    }
 }

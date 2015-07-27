@@ -6,12 +6,17 @@ import java.util.Date;
 	import lejos.nxt.Button;
 import lejos.nxt.LCD;
 import lejos.nxt.Motor;
+import lejos.nxt.MotorPort;
+import lejos.nxt.NXTMotor;
 import lejos.nxt.SensorPort;
 import lejos.nxt.Sound;
+import lejos.nxt.TachoMotorPort;
+import lejos.nxt.addon.LnrActrFirgelliNXT;
 import lejos.nxt.addon.MMXRegulatedMotor;
 import lejos.nxt.addon.NXTMMX;
 import lejos.nxt.comm.BTConnection;
 import lejos.nxt.comm.Bluetooth;
+import lejos.robotics.EncoderMotor;
 import lejos.robotics.RegulatedMotor;
 import lejos.robotics.RegulatedMotorListener;
 
@@ -21,6 +26,7 @@ import lejos.robotics.RegulatedMotorListener;
 		protected RegulatedMotor motor2;
 		protected RegulatedMotor motor3;
 		protected RegulatedMotor motor4;
+		protected LnrActrFirgelliNXT linearActuator;
 
 
 		protected  void setMaxSpeed(){
@@ -46,11 +52,16 @@ import lejos.robotics.RegulatedMotorListener;
 				return null;
 		}
 
+		public static LnrActrFirgelliNXT getLinAcc(){
+			return new LnrActrFirgelliNXT(MotorPort.C);
+		}
+		
 		protected float topSpeed = 0;
 		protected float vx = 0;
 		protected float vy = 0;
 		protected float turningspeed = 0;
-
+		protected int status = ResponseCode.OK.value;
+		
 		protected float MAX_SPEED;
 
 		protected void stopAllMotors() {
@@ -107,6 +118,7 @@ import lejos.robotics.RegulatedMotorListener;
 					} catch (Exception e) {
 						e.printStackTrace();
 					}
+					connection.close();
 					stopAllMotors();
 					System.exit(0);
 				}
@@ -216,6 +228,24 @@ import lejos.robotics.RegulatedMotorListener;
 			}
 		}
 
+			private void disconnect() {
+				status = ResponseCode.DISCONNECT.value;
+				send = true;
+				connection.close();
+				System.exit(0);
+			}
+
+			private void handleLiftingarmCommand() throws IOException {
+				float angle = dataIn.readFloat();
+				driveLiftingarmToAngle(angle);
+				status = ResponseCode.OK.value;
+				send = true;
+			}
+
+			private void sendStatus() {
+				send = true;
+			}
+
 			private void handleDriveCommand() throws IOException {
 				topSpeed = dataIn.readFloat();
 				vx = dataIn.readFloat();
@@ -235,6 +265,7 @@ import lejos.robotics.RegulatedMotorListener;
 				LCD.drawString(Float.toString(turningspeed), 0, 6);
 				LCD.drawString(Float.toString(MAX_SPEED), 0,
 						7);
+				status = ResponseCode.OK.value;
 				send = true;
 				if ((vx != 0 || vy != 0 || turningspeed != 0) && topSpeed > 0) {
 					setMotorSpeed( vx,  vy,  turningspeed);
@@ -267,6 +298,8 @@ import lejos.robotics.RegulatedMotorListener;
 				value = min;
 		}
 		
+		protected abstract void driveLiftingarmToAngle(float angle);
+
 		protected abstract void setMotorSpeed(float vx2, float vy2, float turningspeed2);
 
 		protected Thread sendThread = new Thread() {
@@ -281,7 +314,7 @@ import lejos.robotics.RegulatedMotorListener;
 				if (send) {
 					send = false;
 					try {
-						dataOut.writeInt(0);
+						dataOut.writeInt(status);
 						dataOut.writeInt(Math.round(topSpeed));
 						dataOut.flush();
 					} catch (IOException e) {

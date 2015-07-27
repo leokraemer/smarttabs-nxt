@@ -10,6 +10,7 @@ public class MecanumWheels extends AbstractOmniDrive{
 		motor2 = getMotor("B");
 		motor3 = getMotor("1");
 		motor4 = getMotor("2");
+		linearActuator = getLinAcc();
 		setMaxSpeed();
 	}
 
@@ -32,5 +33,13 @@ public class MecanumWheels extends AbstractOmniDrive{
 		tempv2 = vy - vx - turningspeed;
 		tempv3 = - vy + vx - turningspeed;
 		tempv4 = - vy - vx + turningspeed;
+	}
+	
+	// 0.5 mm/encoder tick
+	// total length = 50mm -> 100 Ticks
+	@Override
+	protected void driveLiftingarmToAngle(float angle) {
+		linearActuator.moveTo(Math.round(angle)+10, true);
+		
 	}
 }
