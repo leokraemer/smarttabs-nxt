@@ -1,6 +1,7 @@
 	import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.Date;
 
 	import lejos.nxt.Button;
 import lejos.nxt.LCD;
@@ -12,6 +13,7 @@ import lejos.nxt.addon.NXTMMX;
 import lejos.nxt.comm.BTConnection;
 import lejos.nxt.comm.Bluetooth;
 import lejos.robotics.RegulatedMotor;
+import lejos.robotics.RegulatedMotorListener;
 
 	public abstract class AbstractOmniDrive {
 
@@ -116,6 +118,36 @@ import lejos.robotics.RegulatedMotor;
 		protected float tempv3;
 		protected float tempv4;
 		protected float overflow = 0;
+		
+		protected enum Command{
+			GETSTATUS(1),
+			DRIVE(2),
+			LIFTINGARM(3),
+			DISCONNECT(4);		
+			
+			private int value;
+			
+			private Command(int value){
+				this.value= value;
+			}
+		}
+		
+		
+		protected enum ResponseCode{
+			OK(0),
+			ERROR(-1),
+			SKIPINVALIDCOMMAND(3),
+			DISCONNECT(4),
+			LOWBATTERY(5),
+			MOTORSTALLED(6);
+					
+			private int value;
+			
+			private ResponseCode(int value){
+				this.value= value;
+			}
+		}
+		
 		protected Thread readThread = new Thread(){
 			
 			@Override
@@ -127,18 +159,24 @@ import lejos.robotics.RegulatedMotor;
 			/**
 			 * decode incoming messages and handle motors accordingly
 			 * 
-			 * data protocol: 
-			 * {float: topSpeed, float: vx, float: vy, float: turn}
+			 * {int: command, ...}
 			 * 
-			 * topSpeed in [0,Float.MaxValue]
-			 * vx in [-1,1]
-			 * vy in [-1,1]
-			 * turn in [-1,1]
+			 * {GETSTATUS = 1}
+			 * 
+			 * 
+			 * {DRIVE = 2, float: topSpeed in [0, Float.MaxValue], float: vx in [-1,1], float: vy in [-1,1], float: turn in [-1,1]}
+			 * 
+			 * 
+			 * {LIFTINGARM = 3, float: position in [0,90]}
+			 * 
+			 * 
+			 * {DISCONNECT = 4}
+			 * 
 			 * 
 			 * response:
 			 * {int: status, int: actualSpeed}
 			 * 
-			 * status: 0: ok; -1: error;
+			 * status: 0: ok; 1: skip invalid command; -1: error;
 			 * 
 			 * actualSpeed in [0, infinity]
 			 * 
@@ -153,56 +191,68 @@ import lejos.robotics.RegulatedMotor;
 			 * Back 
 			 * see: http://www.firstroboticscanada.org/main/wp-content/uploads/Omnidirectional-Drive-Systems.pdf
 			 */
-			protected void readData() {
-				try {
-					if (connection.available() >= 16) {
-						topSpeed = dataIn.readFloat();
-						vx = dataIn.readFloat();
-						vy = dataIn.readFloat();
-						turningspeed = dataIn.readFloat();
-						boundsCheck(vx, -1, 1);
-						boundsCheck(vy, -1, 1);
-						boundsCheck(turningspeed, -1, 1);
-						boundsCheck(topSpeed, 0, MAX_SPEED);
-						LCD.clear();
-						if(topSpeed > MAX_SPEED)
-							topSpeed = MAX_SPEED;
-						LCD.drawString(Float.toString(topSpeed), 0,
-								3);
-						LCD.drawString(Float.toString(vx), 0, 4);
-						LCD.drawString(Float.toString(vy), 0, 5);
-						LCD.drawString(Float.toString(turningspeed), 0, 6);
-						LCD.drawString(Float.toString(MAX_SPEED), 0,
-								7);
-						send = true;
-						if ((vx != 0 || vy != 0 || turningspeed != 0) && topSpeed > 0) {
-							setMotorSpeed( vx,  vy,  turningspeed);
-							overflow = Math.max(
-									Math.max(Math.abs(tempv1), Math.abs(tempv2)),
-									Math.max(Math.abs(tempv3), Math.abs(tempv4)));
-							if (overflow > 1) {
-								tempv1 /= overflow;
-								tempv2 /= overflow;
-								tempv3 /= overflow;
-								tempv4 /= overflow;
-							}
-							startMotor(motor1, tempv1);
-							startMotor(motor2, tempv2);
-							startMotor(motor3, tempv3);
-							startMotor(motor4, tempv4);
-						} else {
-							stopAllMotors();
-						}
-					}  else {
-						try {
-							Thread.sleep(0);
-						} catch (InterruptedException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						}
+		protected void readData() {
+			try {
+				if (dataIn.available() > 0) {
+					if (dataIn.readInt() == Command.DRIVE.value) {
+						handleDriveCommand();
+					} else if (dataIn.readInt() == Command.GETSTATUS.value) {
+						sendStatus();
+					} else if (dataIn.readInt() == Command.LIFTINGARM.value) {
+						handleLiftingarmCommand();
+					} else if (dataIn.readInt() == Command.DISCONNECT.value) {
+						disconnect();
 					}
-				} catch (IOException e) {
-					System.out.println("Read exception " + e);
+				} else {
+					try {
+						Thread.sleep(0);
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
+			} catch (IOException e) {
+				System.out.println("Read exception " + e);
+			}
+		}
+
+			private void handleDriveCommand() throws IOException {
+				topSpeed = dataIn.readFloat();
+				vx = dataIn.readFloat();
+				vy = dataIn.readFloat();
+				turningspeed = dataIn.readFloat();
+				boundsCheck(vx, -1, 1);
+				boundsCheck(vy, -1, 1);
+				boundsCheck(turningspeed, -1, 1);
+				boundsCheck(topSpeed, 0, MAX_SPEED);
+				LCD.clear();
+				if(topSpeed > MAX_SPEED)
+					topSpeed = MAX_SPEED;
+				LCD.drawString(Float.toString(topSpeed), 0,
+						3);
+				LCD.drawString(Float.toString(vx), 0, 4);
+				LCD.drawString(Float.toString(vy), 0, 5);
+				LCD.drawString(Float.toString(turningspeed), 0, 6);
+				LCD.drawString(Float.toString(MAX_SPEED), 0,
+						7);
+				send = true;
+				if ((vx != 0 || vy != 0 || turningspeed != 0) && topSpeed > 0) {
+					setMotorSpeed( vx,  vy,  turningspeed);
+					overflow = Math.max(
+							Math.max(Math.abs(tempv1), Math.abs(tempv2)),
+							Math.max(Math.abs(tempv3), Math.abs(tempv4)));
+					if (overflow > 1) {
+						tempv1 /= overflow;
+						tempv2 /= overflow;
+						tempv3 /= overflow;
+						tempv4 /= overflow;
+					}
+					startMotor(motor1, tempv1);
+					startMotor(motor2, tempv2);
+					startMotor(motor3, tempv3);
+					startMotor(motor4, tempv4);
+				} else {
+					stopAllMotors();
 				}
 			}
 
@@ -252,6 +302,8 @@ import lejos.robotics.RegulatedMotor;
 		
 		protected boolean running = true; 
 		
+		protected boolean stalled = false;
+		
 		protected Thread  stallDetector = new Thread(){
 			public void run(){
 				while(running){
@@ -280,7 +332,6 @@ import lejos.robotics.RegulatedMotor;
 				}
 			}
 		};
-		
 		
 		protected BTConnection connection;
 		protected DataInputStream dataIn;
